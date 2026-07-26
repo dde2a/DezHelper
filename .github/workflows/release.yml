@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          toc_version="$(sed -n 's/^## Version: //p' DezHelper.toc)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          test "$toc_version" = "$tag_version" || {
+            echo "Tag $tag_version does not match TOC version $toc_version"
+            exit 1
+          }
+
+      - name: Package and publish
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p ${{ vars.CURSEFORGE_PROJECT_ID }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}

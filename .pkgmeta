@@ -1,0 +1,9 @@
+package-as: DezHelper
+
+manual-changelog: CHANGELOG.md
+
+ignore:
+  - .github
+  - .gitignore
+  - DEPLOYMENT.md
+  - Media/icon.png
