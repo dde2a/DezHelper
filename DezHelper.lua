@@ -27,6 +27,8 @@ local translations = {
         itemDetails = "%s  •  ilvl %d",
         itemDetailsUpgrade = "%s  •  ilvl %d  •  %s %d/%d",
         upgrade = "Upgrade",
+        blocked = "%s cannot be disenchanted and was removed from the list.",
+        blockedReset = "The learned exclusion list has been cleared.",
     },
     fr = {
         uncommon = "Inhabituel",
@@ -45,6 +47,8 @@ local translations = {
         itemDetails = "%s  •  ilvl %d",
         itemDetailsUpgrade = "%s  •  ilvl %d  •  %s %d/%d",
         upgrade = "Amélioration",
+        blocked = "%s ne peut pas être désenchanté et a été retiré de la liste.",
+        blockedReset = "La liste des exclusions apprises a été réinitialisée.",
     },
 }
 local L = locale == "frFR" and translations.fr or translations.en
@@ -72,6 +76,7 @@ local defaults = {
         [4] = false,
     },
     scale = 0.85,
+    blockedItems = {},
 }
 
 local function CopyDefaults(source, destination)
@@ -132,6 +137,19 @@ local function GetItemUpgrade(link)
     }
 end
 
+local function IsRefundable(bag, slot)
+    if not C_Item or not C_Item.CanBeRefunded or not ItemLocation then
+        return false
+    end
+
+    local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
+    return location and location:IsValid() and C_Item.CanBeRefunded(location) or false
+end
+
+local function IsBlocked(itemID)
+    return itemID and DezHelperDB.blockedItems[tostring(itemID)] == true
+end
+
 local function ScanBags()
     wipe(candidates)
 
@@ -143,7 +161,9 @@ local function ScanBags()
                 local name, link, quality, _, _, _, _, _, equipLoc, icon, _, classID, _, _, expansionID =
                     C_Item.GetItemInfo(containerInfo.hyperlink)
 
-                if IsCandidate(link, quality, classID, equipLoc) then
+                if IsCandidate(link, quality, classID, equipLoc)
+                    and not IsRefundable(bag, slot)
+                    and not IsBlocked(containerInfo.itemID) then
                     local key = ItemKey(bag, slot)
                     candidates[#candidates + 1] = {
                         key = key,
@@ -529,7 +549,16 @@ end
 
 SLASH_DEZHELPER1 = "/dez"
 SLASH_DEZHELPER2 = "/dezhelper"
-SlashCmdList.DEZHELPER = function()
+SlashCmdList.DEZHELPER = function(message)
+    if message and message:lower():match("^%s*reset%s*$") then
+        wipe(DezHelperDB.blockedItems)
+        Print(L.blockedReset)
+        if Dez:IsShown() then
+            FullRefresh()
+        end
+        return
+    end
+
     if Dez:IsShown() then
         Dez:Hide()
     else
@@ -541,6 +570,7 @@ end
 Dez:RegisterEvent("ADDON_LOADED")
 Dez:RegisterEvent("BAG_UPDATE_DELAYED")
 Dez:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+Dez:RegisterEvent("UI_ERROR_MESSAGE")
 Dez:RegisterEvent("PLAYER_REGEN_DISABLED")
 Dez:RegisterEvent("PLAYER_REGEN_ENABLED")
 Dez:SetScript("OnEvent", function(self, event, ...)
@@ -556,6 +586,18 @@ Dez:SetScript("OnEvent", function(self, event, ...)
     elseif event == "BAG_UPDATE_DELAYED" or event == "GET_ITEM_INFO_RECEIVED" then
         if self:IsShown() then
             ScheduleRefresh()
+        end
+    elseif event == "UI_ERROR_MESSAGE" then
+        local _, message = ...
+        if message == ERR_CANT_BE_DISENCHANTED and currentKey then
+            local item = FindCandidate(currentKey)
+            if item and item.itemID then
+                DezHelperDB.blockedItems[tostring(item.itemID)] = true
+                selected[currentKey] = nil
+                currentKey = nil
+                Print(string.format(L.blocked, item.name))
+                FullRefresh()
+            end
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
         if self:IsShown() then

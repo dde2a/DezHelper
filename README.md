@@ -9,6 +9,7 @@ selected item for disenchanting.
 - Compact and movable window
 - Uncommon, Rare, and Epic quality filters
 - Item level and upgrade track progress
+- Automatic filtering of refundable and known non-disenchantable items
 - Individual checkboxes and Select All
 - Adjustable interface scale
 - English and French interface
@@ -18,6 +19,8 @@ selected item for disenchanting.
 ## Usage
 
 Type `/dez` or `/dezhelper` to open the window.
+
+Type `/dez reset` to clear the learned non-disenchantable item list.
 
 1. Choose the rarities to display.
 2. Select the items you want to process.

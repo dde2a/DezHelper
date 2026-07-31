@@ -3,6 +3,8 @@
 ## 1.1.0
 
 - Added item upgrade track and level next to the item level.
+- Added automatic filtering for refundable items.
+- Added a learned exclusion list for items rejected by the game.
 
 ## 1.0.0
 
