@@ -8,6 +8,7 @@ selected item for disenchanting.
 
 - Compact and movable window
 - Uncommon, Rare, and Epic quality filters
+- Item level and upgrade track progress
 - Individual checkboxes and Select All
 - Adjustable interface scale
 - English and French interface

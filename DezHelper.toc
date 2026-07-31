@@ -3,7 +3,7 @@
 ## Notes: Select and disenchant items from a compact queue.
 ## Notes-frFR: Sélectionnez et désenchantez vos objets depuis une file compacte.
 ## Author: Damien
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: DezHelperDB
 ## Category: Professions
 ## IconTexture: Interface\AddOns\DezHelper\Media\icon

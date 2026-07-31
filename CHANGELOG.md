@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0
+
+- Added item upgrade track and level next to the item level.
+
 ## 1.0.0
 
 - Initial public release.

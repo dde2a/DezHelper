@@ -25,6 +25,8 @@ local translations = {
         quality = "Quality:",
         selectAll = "Select all",
         itemDetails = "%s  •  ilvl %d",
+        itemDetailsUpgrade = "%s  •  ilvl %d  •  %s %d/%d",
+        upgrade = "Upgrade",
     },
     fr = {
         uncommon = "Inhabituel",
@@ -41,6 +43,8 @@ local translations = {
         quality = "Qualité :",
         selectAll = "Tout sélectionner",
         itemDetails = "%s  •  ilvl %d",
+        itemDetailsUpgrade = "%s  •  ilvl %d  •  %s %d/%d",
+        upgrade = "Amélioration",
     },
 }
 local L = locale == "frFR" and translations.fr or translations.en
@@ -111,6 +115,23 @@ local function GetItemLevel(link)
     return 0
 end
 
+local function GetItemUpgrade(link)
+    if not C_Item or not C_Item.GetItemUpgradeInfo then
+        return nil
+    end
+
+    local info = C_Item.GetItemUpgradeInfo(link)
+    if not info or not info.currentLevel or not info.maxLevel or info.maxLevel <= 0 then
+        return nil
+    end
+
+    return {
+        currentLevel = info.currentLevel,
+        maxLevel = info.maxLevel,
+        track = info.trackString or L.upgrade,
+    }
+end
+
 local function ScanBags()
     wipe(candidates)
 
@@ -133,6 +154,7 @@ local function ScanBags()
                         link = link,
                         quality = quality,
                         level = GetItemLevel(link),
+                        upgrade = GetItemUpgrade(link),
                         icon = icon or containerInfo.iconFileID,
                         count = containerInfo.stackCount or 1,
                         expansionID = expansionID or 0,
@@ -238,8 +260,17 @@ local function RefreshRows()
             row.icon:SetTexture(item.icon)
             row.check:SetChecked(selected[item.key] == true)
             row.name:SetText("|c" .. (QUALITY_COLORS[item.quality] or "ffffffff") .. item.name .. "|r")
-            row.details:SetText(string.format(L.itemDetails,
-                QUALITY_LABELS[item.quality] or "Item", item.level))
+            if item.upgrade then
+                row.details:SetText(string.format(L.itemDetailsUpgrade,
+                    QUALITY_LABELS[item.quality] or "Item",
+                    item.level,
+                    item.upgrade.track,
+                    item.upgrade.currentLevel,
+                    item.upgrade.maxLevel))
+            else
+                row.details:SetText(string.format(L.itemDetails,
+                    QUALITY_LABELS[item.quality] or "Item", item.level))
+            end
         else
             row:Hide()
         end
