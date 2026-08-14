@@ -7,6 +7,12 @@ local visibleItems = {}
 local selected = {}
 local currentKey
 local refreshPending
+local pendingAttempt
+local attemptSequence = 0
+local History
+local historyRows = {}
+local HISTORY_LIMIT = 50
+local UpdateHistory
 
 local locale = GetLocale()
 local translations = {
@@ -29,6 +35,12 @@ local translations = {
         upgrade = "Upgrade",
         blocked = "%s cannot be disenchanted and was removed from the list.",
         blockedReset = "The learned exclusion list has been cleared.",
+        history = "History",
+        historyTitle = "Disenchant history",
+        historyEmpty = "No successful disenchant recorded yet.",
+        historyDetails = "%s  •  ilvl %d",
+        clearHistory = "Clear",
+        clearHistoryConfirm = "Clear the entire disenchant history?",
     },
     fr = {
         uncommon = "Inhabituel",
@@ -49,6 +61,12 @@ local translations = {
         upgrade = "Amélioration",
         blocked = "%s ne peut pas être désenchanté et a été retiré de la liste.",
         blockedReset = "La liste des exclusions apprises a été réinitialisée.",
+        history = "Historique",
+        historyTitle = "Historique des désenchantements",
+        historyEmpty = "Aucun désenchantement réussi enregistré.",
+        historyDetails = "%s  •  ilvl %d",
+        clearHistory = "Vider",
+        clearHistoryConfirm = "Vider tout l’historique des désenchantements ?",
     },
 }
 local L = locale == "frFR" and translations.fr or translations.en
@@ -77,6 +95,7 @@ local defaults = {
     },
     scale = 0.85,
     blockedItems = {},
+    history = {},
 }
 
 local function CopyDefaults(source, destination)
@@ -150,6 +169,64 @@ local function IsBlocked(itemID)
     return itemID and DezHelperDB.blockedItems[tostring(itemID)] == true
 end
 
+local function GetBagItemGUID(bag, slot)
+    if not C_Item or not C_Item.GetItemGUID or not ItemLocation then
+        return nil
+    end
+
+    local location = ItemLocation:CreateFromBagAndSlot(bag, slot)
+    if not location or not location:IsValid() then
+        return nil
+    end
+    return C_Item.GetItemGUID(location)
+end
+
+local function AddHistoryEntry(item)
+    local history = DezHelperDB.history
+    table.insert(history, 1, {
+        timestamp = time(),
+        itemID = item.itemID,
+        link = item.link,
+        name = item.name,
+        icon = item.icon,
+        quality = item.quality,
+        level = item.level,
+        character = UnitName("player"),
+        realm = GetRealmName(),
+    })
+
+    while #history > HISTORY_LIMIT do
+        table.remove(history)
+    end
+
+    if UpdateHistory then
+        UpdateHistory()
+    end
+end
+
+local function ConfirmPendingAttempt()
+    if not pendingAttempt then
+        return
+    end
+
+    local currentGUID = GetBagItemGUID(pendingAttempt.bag, pendingAttempt.slot)
+    local containerInfo = C_Container.GetContainerItemInfo(pendingAttempt.bag, pendingAttempt.slot)
+    local itemChanged
+    if pendingAttempt.guid then
+        itemChanged = currentGUID ~= pendingAttempt.guid
+    else
+        itemChanged = not containerInfo
+            or containerInfo.itemID ~= pendingAttempt.itemID
+            or containerInfo.hyperlink ~= pendingAttempt.link
+    end
+
+    pendingAttempt.itemChanged = pendingAttempt.itemChanged or itemChanged
+    if pendingAttempt.itemChanged and pendingAttempt.castSucceeded then
+        AddHistoryEntry(pendingAttempt)
+        pendingAttempt = nil
+    end
+end
+
 local function ScanBags()
     wipe(candidates)
 
@@ -170,6 +247,7 @@ local function ScanBags()
                         bag = bag,
                         slot = slot,
                         itemID = containerInfo.itemID,
+                        guid = GetBagItemGUID(bag, slot),
                         name = name or L.loading,
                         link = link,
                         quality = quality,
@@ -343,6 +421,151 @@ local function MakeCheck(parent, label)
     return check
 end
 
+UpdateHistory = function()
+    if not History then
+        return
+    end
+
+    local history = DezHelperDB.history
+    local maxOffset = math.max(0, #history - #historyRows)
+    History.scrollBar:SetMinMaxValues(0, maxOffset)
+    if History.scrollBar:GetValue() > maxOffset then
+        History.scrollBar:SetValue(maxOffset)
+    end
+
+    local offset = math.floor(History.scrollBar:GetValue() + 0.5)
+    for index, row in ipairs(historyRows) do
+        local entry = history[offset + index]
+        row.entry = entry
+        if entry then
+            row:Show()
+            row.icon:SetTexture(entry.icon)
+            row.name:SetText("|c" .. (QUALITY_COLORS[entry.quality] or "ffffffff")
+                .. (entry.name or L.loading) .. "|r")
+            local timestamp = entry.timestamp and date("%Y-%m-%d %H:%M", entry.timestamp) or "?"
+            row.details:SetText(string.format(L.historyDetails, timestamp, entry.level or 0))
+        else
+            row:Hide()
+        end
+    end
+
+    History.empty:SetShown(#history == 0)
+    History.count:SetText(tostring(#history) .. "/" .. HISTORY_LIMIT)
+end
+
+local function CreateHistoryInterface()
+    History = CreateFrame("Frame", "DezHelperHistoryFrame", UIParent, "BackdropTemplate")
+    History:SetSize(400, 320)
+    History:SetScale(DezHelperDB.scale)
+    History:SetPoint("LEFT", Dez, "RIGHT", 8, 0)
+    History:SetFrameStrata("DIALOG")
+    History:SetClampedToScreen(true)
+    History:SetMovable(true)
+    History:EnableMouse(true)
+    History:RegisterForDrag("LeftButton")
+    History:SetScript("OnDragStart", History.StartMoving)
+    History:SetScript("OnDragStop", History.StopMovingOrSizing)
+    History:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 16,
+    })
+    History:SetBackdropColor(0.035, 0.025, 0.055, 0.98)
+    History:SetBackdropBorderColor(0.55, 0.28, 0.8, 1)
+
+    local title = History:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    title:SetPoint("TOPLEFT", 20, -18)
+    title:SetText("|cffc084fc" .. L.historyTitle .. "|r")
+
+    History.count = History:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    History.count:SetPoint("TOPRIGHT", -44, -23)
+
+    local close = CreateFrame("Button", nil, History, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -5, -5)
+
+    local listBackground = History:CreateTexture(nil, "BORDER")
+    listBackground:SetPoint("TOPLEFT", 14, -48)
+    listBackground:SetPoint("BOTTOMRIGHT", -14, 48)
+    listBackground:SetColorTexture(0.07, 0.055, 0.09, 0.9)
+
+    History.empty = History:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    History.empty:SetPoint("CENTER", listBackground, "CENTER", 0, 0)
+    History.empty:SetText(L.historyEmpty)
+
+    for index = 1, 8 do
+        local row = CreateFrame("Button", nil, History)
+        row:SetHeight(28)
+        row:SetPoint("LEFT", listBackground, "LEFT", 8, 0)
+        row:SetPoint("RIGHT", listBackground, "RIGHT", -22, 0)
+        if index == 1 then
+            row:SetPoint("TOP", listBackground, "TOP", 0, -6)
+        else
+            row:SetPoint("TOP", historyRows[index - 1], "BOTTOM", 0, 0)
+        end
+
+        row.highlight = row:CreateTexture(nil, "HIGHLIGHT")
+        row.highlight:SetAllPoints()
+        row.highlight:SetColorTexture(0.35, 0.18, 0.5, 0.3)
+
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(24, 24)
+        row.icon:SetPoint("LEFT", 1, 0)
+
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 7, -1)
+        row.name:SetPoint("RIGHT", -4, 0)
+        row.name:SetJustifyH("LEFT")
+
+        row.details = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.details:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 7, 1)
+        row.details:SetJustifyH("LEFT")
+
+        row:SetScript("OnEnter", function()
+            if row.entry and row.entry.link then
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                GameTooltip:SetHyperlink(row.entry.link)
+            end
+        end)
+        row:SetScript("OnLeave", GameTooltip_Hide)
+        historyRows[index] = row
+    end
+
+    History.scrollBar = CreateFrame("Slider", nil, History, "UIPanelScrollBarTemplate")
+    History.scrollBar:SetPoint("TOPRIGHT", listBackground, "TOPRIGHT", -3, -16)
+    History.scrollBar:SetPoint("BOTTOMRIGHT", listBackground, "BOTTOMRIGHT", -3, 16)
+    History.scrollBar:SetValueStep(1)
+    History.scrollBar:SetObeyStepOnDrag(true)
+    History.scrollBar:SetScript("OnValueChanged", UpdateHistory)
+
+    History:EnableMouseWheel(true)
+    History:SetScript("OnMouseWheel", function(_, delta)
+        History.scrollBar:SetValue(History.scrollBar:GetValue() - delta)
+    end)
+
+    StaticPopupDialogs.DEZHELPER_CLEAR_HISTORY = {
+        text = L.clearHistoryConfirm,
+        button1 = YES,
+        button2 = NO,
+        OnAccept = function()
+            wipe(DezHelperDB.history)
+            UpdateHistory()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+
+    local clear = MakeButton(History, L.clearHistory, 90, 24)
+    clear:SetPoint("BOTTOM", 0, 14)
+    clear:SetScript("OnClick", function()
+        StaticPopup_Show("DEZHELPER_CLEAR_HISTORY")
+    end)
+
+    History:Hide()
+    UpdateHistory()
+end
+
 local function CreateInterface()
     Dez:SetSize(430, 390)
     Dez:SetScale(DezHelperDB.scale)
@@ -416,6 +639,7 @@ local function CreateInterface()
         -- curseur sous la souris et provoque une oscillation. On applique
         -- donc l'échelle uniquement lorsque le bouton est relâché.
         Dez:SetScale(DezHelperDB.scale)
+        History:SetScale(DezHelperDB.scale)
     end)
 
     local filterLabel = Dez:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -539,17 +763,59 @@ local function CreateInterface()
     Dez.actionButton.icon:SetPoint("LEFT", 12, 0)
     Dez.actionButton.icon:Hide()
     Dez.actionButton:SetScript("PostClick", function()
-        -- Le serveur modifie le sac après le clic; BAG_UPDATE_DELAYED choisira
-        -- alors le prochain objet sans automatiser une seconde action.
+        local item = currentKey and FindCandidate(currentKey)
+        if item then
+            attemptSequence = attemptSequence + 1
+            pendingAttempt = {
+                sequence = attemptSequence,
+                guid = item.guid,
+                bag = item.bag,
+                slot = item.slot,
+                itemID = item.itemID,
+                link = item.link,
+                name = item.name,
+                icon = item.icon,
+                quality = item.quality,
+                level = item.level,
+            }
+            local sequence = attemptSequence
+            C_Timer.After(10, function()
+                if pendingAttempt and pendingAttempt.sequence == sequence then
+                    pendingAttempt = nil
+                end
+            end)
+        end
         ScheduleRefresh()
     end)
 
+    local historyButton = MakeButton(Dez, L.history, 74, 20)
+    historyButton:SetPoint("BOTTOMLEFT", 10, 5)
+    historyButton:SetScript("OnClick", function()
+        if History:IsShown() then
+            History:Hide()
+        else
+            UpdateHistory()
+            History:Show()
+        end
+    end)
+
     Dez:Hide()
+    CreateHistoryInterface()
 end
 
 SLASH_DEZHELPER1 = "/dez"
 SLASH_DEZHELPER2 = "/dezhelper"
 SlashCmdList.DEZHELPER = function(message)
+    if message and message:lower():match("^%s*history%s*$") then
+        if History:IsShown() then
+            History:Hide()
+        else
+            UpdateHistory()
+            History:Show()
+        end
+        return
+    end
+
     if message and message:lower():match("^%s*reset%s*$") then
         wipe(DezHelperDB.blockedItems)
         Print(L.blockedReset)
@@ -571,6 +837,7 @@ Dez:RegisterEvent("ADDON_LOADED")
 Dez:RegisterEvent("BAG_UPDATE_DELAYED")
 Dez:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 Dez:RegisterEvent("UI_ERROR_MESSAGE")
+Dez:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 Dez:RegisterEvent("PLAYER_REGEN_DISABLED")
 Dez:RegisterEvent("PLAYER_REGEN_ENABLED")
 Dez:SetScript("OnEvent", function(self, event, ...)
@@ -583,13 +850,19 @@ Dez:SetScript("OnEvent", function(self, event, ...)
         CopyDefaults(defaults, DezHelperDB)
         CreateInterface()
         Print(L.loaded)
-    elseif event == "BAG_UPDATE_DELAYED" or event == "GET_ITEM_INFO_RECEIVED" then
+    elseif event == "BAG_UPDATE_DELAYED" then
+        ConfirmPendingAttempt()
+        if self:IsShown() then
+            ScheduleRefresh()
+        end
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
         if self:IsShown() then
             ScheduleRefresh()
         end
     elseif event == "UI_ERROR_MESSAGE" then
         local _, message = ...
         if message == ERR_CANT_BE_DISENCHANTED and currentKey then
+            pendingAttempt = nil
             local item = FindCandidate(currentKey)
             if item and item.itemID then
                 DezHelperDB.blockedItems[tostring(item.itemID)] = true
@@ -598,6 +871,12 @@ Dez:SetScript("OnEvent", function(self, event, ...)
                 Print(string.format(L.blocked, item.name))
                 FullRefresh()
             end
+        end
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unit, _, spellID = ...
+        if unit == "player" and spellID == 13262 and pendingAttempt then
+            pendingAttempt.castSucceeded = true
+            ConfirmPendingAttempt()
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
         if self:IsShown() then
