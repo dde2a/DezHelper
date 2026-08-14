@@ -83,6 +83,13 @@ local QUALITY_LABELS = {
     [4] = L.epic,
 }
 
+-- Some special progression items are equipment but are explicitly flagged by
+-- Blizzard as non-disenchantable. Keep verified exceptions as a final safety
+-- net when their tooltip data is not available yet.
+local KNOWN_NON_DISENCHANTABLE = {
+    [264507] = true, -- Crucible of Erratic Energies
+}
+
 local defaults = {
     point = "CENTER",
     relativePoint = "CENTER",
@@ -169,6 +176,50 @@ local function IsBlocked(itemID)
     return itemID and DezHelperDB.blockedItems[tostring(itemID)] == true
 end
 
+local function HasCannotDisenchantLine(bag, slot, itemID)
+    if itemID and KNOWN_NON_DISENCHANTABLE[itemID] then
+        return true
+    end
+    if not C_TooltipInfo or not C_TooltipInfo.GetBagItem then
+        return false
+    end
+
+    local success, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+    if not success or not data or not data.lines then
+        return false
+    end
+
+    local errorLineType = Enum and Enum.TooltipDataLineType
+        and Enum.TooltipDataLineType.ErrorLine or 41
+    for _, line in ipairs(data.lines) do
+        local text = line.leftText
+        if text then
+            if (ITEM_DISENCHANT_NOT_DISENCHANTABLE and text == ITEM_DISENCHANT_NOT_DISENCHANTABLE)
+                or (ERR_CANT_BE_DISENCHANTED and text == ERR_CANT_BE_DISENCHANTED)
+                or (SPELL_FAILED_CANT_BE_DISENCHANTED and text == SPELL_FAILED_CANT_BE_DISENCHANTED) then
+                return true
+            end
+
+            if line.type == errorLineType then
+                local lowerText = text:lower()
+                if lowerText:find("disenchant", 1, true)
+                    or lowerText:find("désenchant", 1, true) then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function IsDisenchantFailure(messageType, message)
+    return (LE_GAME_ERR_CANT_BE_DISENCHANTED and messageType == LE_GAME_ERR_CANT_BE_DISENCHANTED)
+        or (ERR_CANT_BE_DISENCHANTED and message == ERR_CANT_BE_DISENCHANTED)
+        or (SPELL_FAILED_CANT_BE_DISENCHANTED and message == SPELL_FAILED_CANT_BE_DISENCHANTED)
+        or (ITEM_DISENCHANT_NOT_DISENCHANTABLE and message == ITEM_DISENCHANT_NOT_DISENCHANTABLE)
+        or (SPELL_FAILED_BAD_TARGETS and message == SPELL_FAILED_BAD_TARGETS)
+end
+
 local function GetBagItemGUID(bag, slot)
     if not C_Item or not C_Item.GetItemGUID or not ItemLocation then
         return nil
@@ -240,6 +291,7 @@ local function ScanBags()
 
                 if IsCandidate(link, quality, classID, equipLoc)
                     and not IsRefundable(bag, slot)
+                    and not HasCannotDisenchantLine(bag, slot, containerInfo.itemID)
                     and not IsBlocked(containerInfo.itemID) then
                     local key = ItemKey(bag, slot)
                     candidates[#candidates + 1] = {
@@ -860,8 +912,8 @@ Dez:SetScript("OnEvent", function(self, event, ...)
             ScheduleRefresh()
         end
     elseif event == "UI_ERROR_MESSAGE" then
-        local _, message = ...
-        if message == ERR_CANT_BE_DISENCHANTED and currentKey then
+        local messageType, message = ...
+        if IsDisenchantFailure(messageType, message) and currentKey then
             pendingAttempt = nil
             local item = FindCandidate(currentKey)
             if item and item.itemID then

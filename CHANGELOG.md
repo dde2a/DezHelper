@@ -5,6 +5,7 @@
 - Added item upgrade track and level next to the item level.
 - Added automatic filtering for refundable items.
 - Added a learned exclusion list for items rejected by the game.
+- Added tooltip-based detection for special non-disenchantable equipment.
 - Added a persistent history of the 50 most recent successful disenchants.
 
 ## 1.0.0
