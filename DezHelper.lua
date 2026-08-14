@@ -38,6 +38,8 @@ local translations = {
         history = "History",
         historyTitle = "Disenchant history",
         historyEmpty = "No successful disenchant recorded yet.",
+        historyNoResults = "No matching item.",
+        search = "Search",
         historyDetails = "%s  •  ilvl %d",
         clearHistory = "Clear",
         clearHistoryConfirm = "Clear the entire disenchant history?",
@@ -64,6 +66,8 @@ local translations = {
         history = "Historique",
         historyTitle = "Historique des désenchantements",
         historyEmpty = "Aucun désenchantement réussi enregistré.",
+        historyNoResults = "Aucun objet correspondant.",
+        search = "Rechercher",
         historyDetails = "%s  •  ilvl %d",
         clearHistory = "Vider",
         clearHistoryConfirm = "Vider tout l’historique des désenchantements ?",
@@ -215,11 +219,20 @@ local function HasCannotDisenchantLine(bag, slot, itemID)
 end
 
 local function IsDisenchantFailure(messageType, message)
-    return (LE_GAME_ERR_CANT_BE_DISENCHANTED and messageType == LE_GAME_ERR_CANT_BE_DISENCHANTED)
+    if (LE_GAME_ERR_CANT_BE_DISENCHANTED and messageType == LE_GAME_ERR_CANT_BE_DISENCHANTED)
         or (ERR_CANT_BE_DISENCHANTED and message == ERR_CANT_BE_DISENCHANTED)
         or (SPELL_FAILED_CANT_BE_DISENCHANTED and message == SPELL_FAILED_CANT_BE_DISENCHANTED)
         or (ITEM_DISENCHANT_NOT_DISENCHANTABLE and message == ITEM_DISENCHANT_NOT_DISENCHANTABLE)
-        or (SPELL_FAILED_BAD_TARGETS and message == SPELL_FAILED_BAD_TARGETS)
+        or (SPELL_FAILED_BAD_TARGETS and message == SPELL_FAILED_BAD_TARGETS) then
+        return true
+    end
+
+    -- A few special items return a plain localized UI error instead of the
+    -- dedicated error code. Match that text as a fallback.
+    local lowerMessage = type(message) == "string" and message:lower() or ""
+    return lowerMessage:find("cannot be disenchanted", 1, true) ~= nil
+        or lowerMessage:find("can't be disenchanted", 1, true) ~= nil
+        or lowerMessage:find("ne peut pas être désenchant", 1, true) ~= nil
 end
 
 local function GetBagItemGUID(bag, slot)
@@ -481,7 +494,16 @@ UpdateHistory = function()
     end
 
     local history = DezHelperDB.history
-    local maxOffset = math.max(0, #history - #historyRows)
+    local filteredHistory = {}
+    local query = History.searchBox and History.searchBox:GetText():lower():match("^%s*(.-)%s*$") or ""
+    for _, entry in ipairs(history) do
+        local name = entry.name and entry.name:lower() or ""
+        if query == "" or name:find(query, 1, true) then
+            filteredHistory[#filteredHistory + 1] = entry
+        end
+    end
+
+    local maxOffset = math.max(0, #filteredHistory - #historyRows)
     History.scrollBar:SetMinMaxValues(0, maxOffset)
     if History.scrollBar:GetValue() > maxOffset then
         History.scrollBar:SetValue(maxOffset)
@@ -489,7 +511,7 @@ UpdateHistory = function()
 
     local offset = math.floor(History.scrollBar:GetValue() + 0.5)
     for index, row in ipairs(historyRows) do
-        local entry = history[offset + index]
+        local entry = filteredHistory[offset + index]
         row.entry = entry
         if entry then
             row:Show()
@@ -503,8 +525,13 @@ UpdateHistory = function()
         end
     end
 
-    History.empty:SetShown(#history == 0)
-    History.count:SetText(tostring(#history) .. "/" .. HISTORY_LIMIT)
+    History.empty:SetShown(#filteredHistory == 0)
+    History.empty:SetText(#history == 0 and L.historyEmpty or L.historyNoResults)
+    if query == "" then
+        History.count:SetText(tostring(#history) .. "/" .. HISTORY_LIMIT)
+    else
+        History.count:SetText(tostring(#filteredHistory) .. "/" .. tostring(#history))
+    end
 end
 
 local function CreateHistoryInterface()
@@ -537,8 +564,20 @@ local function CreateHistoryInterface()
     local close = CreateFrame("Button", nil, History, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -5, -5)
 
+    History.searchBox = CreateFrame("EditBox", nil, History, "SearchBoxTemplate")
+    History.searchBox:SetSize(220, 22)
+    History.searchBox:SetPoint("TOPLEFT", 16, -45)
+    if History.searchBox.Instructions then
+        History.searchBox.Instructions:SetText(L.search)
+    end
+    History.searchBox:SetScript("OnTextChanged", function(self)
+        SearchBoxTemplate_OnTextChanged(self)
+        History.scrollBar:SetValue(0)
+        UpdateHistory()
+    end)
+
     local listBackground = History:CreateTexture(nil, "BORDER")
-    listBackground:SetPoint("TOPLEFT", 14, -48)
+    listBackground:SetPoint("TOPLEFT", 14, -74)
     listBackground:SetPoint("BOTTOMRIGHT", -14, 48)
     listBackground:SetColorTexture(0.07, 0.055, 0.09, 0.9)
 
@@ -546,7 +585,7 @@ local function CreateHistoryInterface()
     History.empty:SetPoint("CENTER", listBackground, "CENTER", 0, 0)
     History.empty:SetText(L.historyEmpty)
 
-    for index = 1, 8 do
+    for index = 1, 7 do
         local row = CreateFrame("Button", nil, History)
         row:SetHeight(28)
         row:SetPoint("LEFT", listBackground, "LEFT", 8, 0)
@@ -822,6 +861,7 @@ local function CreateInterface()
             attemptSequence = attemptSequence + 1
             pendingAttempt = {
                 sequence = attemptSequence,
+                key = item.key,
                 guid = item.guid,
                 bag = item.bag,
                 slot = item.slot,
@@ -915,13 +955,15 @@ Dez:SetScript("OnEvent", function(self, event, ...)
         end
     elseif event == "UI_ERROR_MESSAGE" then
         local messageType, message = ...
-        if IsDisenchantFailure(messageType, message) and currentKey then
+        if IsDisenchantFailure(messageType, message) and (pendingAttempt or currentKey) then
+            local item = pendingAttempt or FindCandidate(currentKey)
             pendingAttempt = nil
-            local item = FindCandidate(currentKey)
             if item and item.itemID then
                 DezHelperDB.blockedItems[tostring(item.itemID)] = true
-                selected[currentKey] = nil
-                currentKey = nil
+                selected[item.key] = nil
+                if currentKey == item.key then
+                    currentKey = nil
+                end
                 Print(string.format(L.blocked, item.name))
                 FullRefresh()
             end

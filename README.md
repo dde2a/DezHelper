@@ -24,6 +24,7 @@ Type `/dez reset` to clear the learned non-disenchantable item list.
 
 Type `/dez history` to open the history of successful disenchants. DezHelper
 keeps the 50 most recent entries with their date, item link, and item level.
+The history window can be searched instantly by item name.
 
 1. Choose the rarities to display.
 2. Select the items you want to process.

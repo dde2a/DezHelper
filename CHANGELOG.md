@@ -7,7 +7,9 @@
 - Added a learned exclusion list for items rejected by the game.
 - Added tooltip-based detection for special non-disenchantable equipment.
 - Added safety exclusions for Cyrce's Circlet, Seal of Ghoulish Glee, and Crucible of Erratic Energies when WoW omits the tooltip restriction.
+- Improved failed-disenchant handling so the rejected item is learned and removed reliably.
 - Added a persistent history of the 50 most recent successful disenchants.
+- Added instant item-name search to the disenchant history.
 
 ## 1.0.0
 
