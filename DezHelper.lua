@@ -788,8 +788,8 @@ local function CreateInterface()
         ScheduleRefresh()
     end)
 
-    local historyButton = MakeButton(Dez, L.history, 74, 20)
-    historyButton:SetPoint("BOTTOMLEFT", 10, 5)
+    local historyButton = MakeButton(Dez, L.history, 86, 20)
+    historyButton:SetPoint("TOP", 0, -99)
     historyButton:SetScript("OnClick", function()
         if History:IsShown() then
             History:Hide()
