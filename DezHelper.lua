@@ -87,6 +87,8 @@ local QUALITY_LABELS = {
 -- Blizzard as non-disenchantable. Keep verified exceptions as a final safety
 -- net when their tooltip data is not available yet.
 local KNOWN_NON_DISENCHANTABLE = {
+    [117364] = true, -- Seal of Ghoulish Glee
+    [228411] = true, -- Cyrce's Circlet
     [264507] = true, -- Crucible of Erratic Energies
 }
 

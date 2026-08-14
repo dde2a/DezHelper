@@ -6,6 +6,7 @@
 - Added automatic filtering for refundable items.
 - Added a learned exclusion list for items rejected by the game.
 - Added tooltip-based detection for special non-disenchantable equipment.
+- Added safety exclusions for Cyrce's Circlet, Seal of Ghoulish Glee, and Crucible of Erratic Energies when WoW omits the tooltip restriction.
 - Added a persistent history of the 50 most recent successful disenchants.
 
 ## 1.0.0

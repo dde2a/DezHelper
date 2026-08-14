@@ -9,7 +9,7 @@ selected item for disenchanting.
 - Compact and movable window
 - Uncommon, Rare, and Epic quality filters
 - Item level and upgrade track progress
-- Automatic filtering of refundable and known non-disenchantable items
+- Automatic filtering of refundable, tooltip-blocked, and known special non-disenchantable items
 - Individual checkboxes and Select All
 - Adjustable interface scale
 - English and French interface
